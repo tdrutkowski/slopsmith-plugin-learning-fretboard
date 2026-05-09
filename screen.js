@@ -312,6 +312,14 @@ function _fbGetActiveNotes(t, notes, chords) {
 // ── Hooks ───────────────────────────────────────────────────────────────
 
 (function() {
+    // Idempotency: if screen.js is re-evaluated (loader cache miss, hot reload,
+    // older core builds without the load-side guard), don't re-wrap playSong —
+    // each re-wrap captures the previous wrapper, growing the chain and
+    // leaking closures.
+    const HOOK_KEY = '__slopsmithFretboardHooksInstalled';
+    if (window[HOOK_KEY]) return;
+    window[HOOK_KEY] = true;
+
     const origPlaySong = window.playSong;
     window.playSong = async function(filename, arrangement) {
         await origPlaySong(filename, arrangement);
