@@ -7,7 +7,6 @@ let _fbCtx = null;
 let _fbDismissBtn = null;
 
 const FB_STRINGS = 6;
-const FB_FRETS = 24;
 const FB_STRING_COLORS = [
     '#cc0000', '#cca800', '#0066cc',
     '#cc6600', '#00cc66', '#9900cc',
@@ -18,6 +17,37 @@ const FB_STRING_BRIGHT = [
 ];
 const FB_DOT_FRETS = [3, 5, 7, 9, 12, 15, 17, 19, 21, 24];
 const FB_DOUBLE_DOT = [12, 24];
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+const FB_FADE_OUT = 10; // seconds to fade after note ends
+
+let _fbMaxFret = 12; // recomputed per song
+
+// ── Note pitch helpers ───────────────────────────────────────────────────
+
+function _fbGetOpenStringMidi() {
+    const sc = highway.getStringCount() || 6;
+    const info = highway.getSongInfo();
+    const isBass = /bass/i.test((info && info.arrangement) || '') || sc === 4;
+    const base = isBass ? [28, 33, 38, 43] : [40, 45, 50, 55, 59, 64];
+    while (base.length < sc) base.unshift(base[0] - 5);
+    return base;
+}
+
+function _fbNoteLabel(rsString, fret, tuning, capo) {
+    const open = _fbGetOpenStringMidi();
+    const midi = (open[rsString] || 40) + (tuning[rsString] || 0) + (capo || 0) + fret;
+    return NOTE_NAMES[((midi % 12) + 12) % 12];
+}
+
+function _fbComputeMaxFret() {
+    let max = 0;
+    const notes = highway.getNotes();
+    const chords = highway.getChords();
+    if (notes) for (const n of notes) if (n.f > max) max = n.f;
+    if (chords) for (const c of chords) for (const cn of (c.notes || [])) if (cn.f > max) max = cn.f;
+    _fbMaxFret = Math.max(12, max);
+}
 
 // ── Toggle ──────────────────────────────────────────────────────────────
 
@@ -84,6 +114,7 @@ function _fbCreateCanvas() {
     player.insertBefore(_fbDismissBtn, controls);
 
     _fbCtx = _fbCanvas.getContext('2d');
+    _fbComputeMaxFret();
     _fbResize();
     window.addEventListener('resize', _fbResize);
     requestAnimationFrame(_fbDraw);
@@ -130,6 +161,11 @@ function _fbDraw() {
     const H = _fbCanvas.height;
     const ctx = _fbCtx;
 
+    const sc = highway.getStringCount() || 6;
+    const songInfo = highway.getSongInfo();
+    const isBass = /bass/i.test((songInfo && songInfo.arrangement) || '') || sc === 4;
+    const numStrings = isBass ? 4 : sc;
+
     // Clear
     ctx.fillStyle = 'rgba(8, 8, 16, 0.92)';
     ctx.fillRect(0, 0, W, H);
@@ -138,17 +174,19 @@ function _fbDraw() {
     const padR = 10;
     const padT = 10;
     const padB = 20;  // space for fret numbers
-    const fretW = (W - padL - padR) / FB_FRETS;
-    const stringH = (H - padT - padB) / (FB_STRINGS - 1);
+    const fretW = (W - padL - padR) / _fbMaxFret;
+    // Spreading fewer strings across the same total height keeps fretboard size constant
+    const stringH = (H - padT - padB) / (numStrings - 1);
+    const center = (numStrings - 1) / 2;
 
     // Draw fret lines
     ctx.strokeStyle = '#2a2a40';
     ctx.lineWidth = 1;
-    for (let f = 0; f <= FB_FRETS; f++) {
+    for (let f = 0; f <= _fbMaxFret; f++) {
         const x = padL + f * fretW;
         ctx.beginPath();
         ctx.moveTo(x, padT);
-        ctx.lineTo(x, padT + (FB_STRINGS - 1) * stringH);
+        ctx.lineTo(x, padT + (numStrings - 1) * stringH);
         ctx.stroke();
 
         // Nut (thicker at fret 0)
@@ -157,36 +195,34 @@ function _fbDraw() {
             ctx.lineWidth = 3;
             ctx.beginPath();
             ctx.moveTo(x, padT);
-            ctx.lineTo(x, padT + (FB_STRINGS - 1) * stringH);
+            ctx.lineTo(x, padT + (numStrings - 1) * stringH);
             ctx.stroke();
             ctx.strokeStyle = '#2a2a40';
             ctx.lineWidth = 1;
         }
     }
 
-    // Draw fret dots
+    // Draw fret dots — positioned relative to center so they scale with string count
     for (const f of FB_DOT_FRETS) {
-        if (f > FB_FRETS) continue;
+        if (f > _fbMaxFret) continue;
         const x = padL + (f - 0.5) * fretW;
         const isDouble = FB_DOUBLE_DOT.includes(f);
         ctx.fillStyle = '#1a1a30';
         if (isDouble) {
-            const y1 = padT + 1.5 * stringH;
-            const y2 = padT + 3.5 * stringH;
+            const y1 = padT + (center - 1) * stringH;
+            const y2 = padT + (center + 1) * stringH;
             ctx.beginPath(); ctx.arc(x, y1, 4, 0, Math.PI * 2); ctx.fill();
             ctx.beginPath(); ctx.arc(x, y2, 4, 0, Math.PI * 2); ctx.fill();
         } else {
-            const y = padT + 2.5 * stringH;
+            const y = padT + center * stringH;
             ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
         }
     }
 
     // Draw strings
-    for (let s = 0; s < FB_STRINGS; s++) {
+    for (let s = 0; s < numStrings; s++) {
         const y = padT + s * stringH;
-        // String 0 = high e (top), string 5 = low E (bottom)
-        // But in Rocksmith, string 0 = low E. So reverse: draw index (FB_STRINGS-1-s)
-        const rsString = FB_STRINGS - 1 - s;
+        const rsString = numStrings - 1 - s;
         ctx.strokeStyle = FB_STRING_COLORS[rsString];
         ctx.lineWidth = 1 + s * 0.3;  // thicker for lower strings
         ctx.globalAlpha = 0.4;
@@ -202,19 +238,21 @@ function _fbDraw() {
     ctx.font = '9px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    for (let f = 1; f <= FB_FRETS; f++) {
+    for (let f = 1; f <= _fbMaxFret; f++) {
         const x = padL + (f - 0.5) * fretW;
-        ctx.fillText(f, x, padT + (FB_STRINGS - 1) * stringH + 5);
+        ctx.fillText(f, x, padT + (numStrings - 1) * stringH + 5);
     }
 
     // String names
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.font = 'bold 10px sans-serif';
-    const stringNames = ['e', 'B', 'G', 'D', 'A', 'E'];
-    for (let s = 0; s < FB_STRINGS; s++) {
+    const guitarNames = ['e', 'B', 'G', 'D', 'A', 'E'];
+    const bassNames   = ['G', 'D', 'A', 'E'];
+    const stringNames = isBass ? bassNames : guitarNames.slice(0, numStrings);
+    for (let s = 0; s < numStrings; s++) {
         const y = padT + s * stringH;
-        const rsString = FB_STRINGS - 1 - s;
+        const rsString = numStrings - 1 - s;
         ctx.fillStyle = FB_STRING_COLORS[rsString];
         ctx.fillText(stringNames[s], padL - 8, y);
     }
@@ -225,11 +263,14 @@ function _fbDraw() {
     const chords = highway.getChords();
     const activeNotes = _fbGetActiveNotes(t, notes, chords);
 
+    const tuning = (songInfo && songInfo.tuning) || [];
+    const capo = (songInfo && songInfo.capo) || 0;
+
     // Draw active notes
     for (const n of activeNotes) {
         const rsString = n.s;  // Rocksmith string (0=low E)
         const fret = n.f;
-        const drawString = FB_STRINGS - 1 - rsString;  // flip for display
+        const drawString = numStrings - 1 - rsString;  // flip for display
 
         const y = padT + drawString * stringH;
         let x;
@@ -246,22 +287,23 @@ function _fbDraw() {
         ctx.globalAlpha = alpha * 0.3;
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(x, y, 12, 0, Math.PI * 2);
+        ctx.arc(x, y, 24, 0, Math.PI * 2);
         ctx.fill();
 
         // Note dot
         ctx.globalAlpha = alpha;
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(x, y, 7, 0, Math.PI * 2);
+        ctx.arc(x, y, 14, 0, Math.PI * 2);
         ctx.fill();
 
-        // Fret number
+        // Note letter
+        const noteLabel = _fbNoteLabel(rsString, fret, tuning, capo);
         ctx.fillStyle = '#000';
-        ctx.font = 'bold 8px sans-serif';
+        ctx.font = noteLabel.length > 1 ? 'bold 14px sans-serif' : 'bold 16px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(fret, x, y);
+        ctx.fillText(noteLabel, x, y);
 
         ctx.globalAlpha = 1;
     }
@@ -269,40 +311,47 @@ function _fbDraw() {
 
 function _fbGetActiveNotes(t, notes, chords) {
     const active = [];
-    const window = 0.08;  // notes within 80ms of current time
+    const lookahead = 0.08;
 
-    // Standalone notes
     if (notes) {
         for (const n of notes) {
+            if (n.t > t + 0.5) break;
             const noteEnd = n.t + (n.sus || 0);
-            if (n.t <= t + window && noteEnd >= t - window) {
-                // Fade based on sustain progress
-                let alpha = 1;
+            if (n.t > t + lookahead || noteEnd + FB_FADE_OUT < t) continue;
+            let alpha;
+            if (t <= noteEnd) {
+                alpha = 1;
                 if (n.sus > 0 && t > n.t) {
                     alpha = Math.max(0.3, 1 - (t - n.t) / n.sus * 0.7);
                 }
-                active.push({ s: n.s, f: n.f, alpha });
+            } else {
+                // Fade from the alpha the note had when it ended (0.3 for sustained, 1 for instant)
+                const startAlpha = n.sus > 0 ? 0.3 : 1;
+                alpha = startAlpha * Math.max(0, 1 - (t - noteEnd) / FB_FADE_OUT);
             }
-            if (n.t > t + 0.5) break;  // notes are sorted by time
+            active.push({ s: n.s, f: n.f, alpha });
         }
     }
 
-    // Chord notes
     if (chords) {
         for (const c of chords) {
-            if (c.t <= t + window && c.t >= t - 0.3) {
-                for (const cn of (c.notes || [])) {
-                    const noteEnd = c.t + (cn.sus || 0);
-                    if (noteEnd >= t - window) {
-                        let alpha = 1;
-                        if (cn.sus > 0 && t > c.t) {
-                            alpha = Math.max(0.3, 1 - (t - c.t) / cn.sus * 0.7);
-                        }
-                        active.push({ s: cn.s, f: cn.f, alpha });
-                    }
-                }
-            }
             if (c.t > t + 0.5) break;
+            if (c.t > t + lookahead) continue;
+            for (const cn of (c.notes || [])) {
+                const noteEnd = c.t + (cn.sus || 0);
+                if (noteEnd + FB_FADE_OUT < t) continue;
+                let alpha;
+                if (t <= noteEnd) {
+                    alpha = 1;
+                    if (cn.sus > 0 && t > c.t) {
+                        alpha = Math.max(0.3, 1 - (t - c.t) / cn.sus * 0.7);
+                    }
+                } else {
+                    const startAlpha = cn.sus > 0 ? 0.3 : 1;
+                    alpha = startAlpha * Math.max(0, 1 - (t - noteEnd) / FB_FADE_OUT);
+                }
+                active.push({ s: cn.s, f: cn.f, alpha });
+            }
         }
     }
 
@@ -312,14 +361,6 @@ function _fbGetActiveNotes(t, notes, chords) {
 // ── Hooks ───────────────────────────────────────────────────────────────
 
 (function() {
-    // Idempotency: if screen.js is re-evaluated (loader cache miss, hot reload,
-    // older core builds without the load-side guard), don't re-wrap playSong —
-    // each re-wrap captures the previous wrapper, growing the chain and
-    // leaking closures.
-    const HOOK_KEY = '__slopsmithFretboardHooksInstalled';
-    if (window[HOOK_KEY]) return;
-    window[HOOK_KEY] = true;
-
     const origPlaySong = window.playSong;
     window.playSong = async function(filename, arrangement) {
         await origPlaySong(filename, arrangement);
