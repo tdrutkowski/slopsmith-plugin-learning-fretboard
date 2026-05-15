@@ -201,7 +201,12 @@ async function _fbTriggerScaleDetect() {
         const pitchClasses = _fbGetPlayedPitchClasses(tuning, capo);
         const tonal = await _fbLoadTonal();
         const candidates = pitchClasses.length ? tonal.Scale.detect(pitchClasses) : [];
-        const scaleName = candidates[0] || 'C chromatic';
+        if (!candidates.length) {
+            _fbDetectedScale = null;
+            _fbScalePositions = null;
+            return;
+        }
+        const scaleName = candidates[0];
         const scaleData = tonal.Scale.get(scaleName);
         _fbDetectedScale = {
             name: scaleName,
@@ -317,12 +322,12 @@ function _fbDraw() {
             ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
             ctx.fillText(_fbDetectedScale.name, padL + 4, 2);
-        } else {
+        } else if (_fbScaleLoading) {
             ctx.fillStyle = '#555';
             ctx.font = '11px sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
-            ctx.fillText(_fbScaleLoading ? 'Detecting scale…' : 'No scale data', padL + 4, 2);
+            ctx.fillText('Detecting scale…', padL + 4, 2);
         }
     }
 
@@ -388,12 +393,12 @@ function _fbDrawNoteDot(ctx, n, numStrings, padL, padT, fretW, stringH, tuning, 
     if (_fbMode === 'classic') {
         ctx.globalAlpha = alpha * 0.3;
         ctx.fillStyle = color;
-        ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = alpha;
         ctx.fillStyle = color;
-        ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#000';
-        ctx.font = 'bold 8px sans-serif';
+        ctx.font = 'bold 14px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(fret, x, y);
@@ -401,7 +406,7 @@ function _fbDrawNoteDot(ctx, n, numStrings, padL, padT, fretW, stringH, tuning, 
         // notes + scales
         ctx.globalAlpha = alpha * 0.3;
         ctx.fillStyle = color;
-        ctx.beginPath(); ctx.arc(x, y, 24, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = alpha;
         ctx.fillStyle = color;
         ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI * 2); ctx.fill();
@@ -475,6 +480,7 @@ if (!window[HOOK_KEY]) {
     };
 
     window.slopsmith.on('song:ready', () => {
+        if (_fbMode !== 'off') _fbComputeMaxFret();
         if (_fbMode === 'scales') _fbTriggerScaleDetect();
     });
 }
