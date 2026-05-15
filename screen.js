@@ -15,16 +15,27 @@ const FB_STRING_BRIGHT = ['#ff4444', '#ffe050', '#4499ff', '#ff9944', '#44ff99',
 const FB_DOT_FRETS = [3, 5, 7, 9, 12, 15, 17, 19, 21, 24];
 const FB_DOUBLE_DOT = [12, 24];
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const SCALE_CATALOG = [
+    { type: 'minor pentatonic', intervals: [0, 3, 5, 7, 10] },
+    { type: 'major pentatonic', intervals: [0, 2, 4, 7, 9] },
+    { type: 'blues',            intervals: [0, 3, 5, 6, 7, 10] },
+    { type: 'major',            intervals: [0, 2, 4, 5, 7, 9, 11] },
+    { type: 'minor',            intervals: [0, 2, 3, 5, 7, 8, 10] },
+    { type: 'dorian',           intervals: [0, 2, 3, 5, 7, 9, 10] },
+    { type: 'mixolydian',       intervals: [0, 2, 4, 5, 7, 9, 10] },
+    { type: 'phrygian',         intervals: [0, 1, 3, 5, 7, 8, 10] },
+    { type: 'harmonic minor',   intervals: [0, 2, 3, 5, 7, 8, 11] },
+    { type: 'lydian',           intervals: [0, 2, 4, 6, 7, 9, 11] },
+    { type: 'locrian',          intervals: [0, 1, 3, 5, 6, 8, 10] },
+];
 const FB_FADE_NOTES = 10; // seconds — notes / scales trailing fade
 
 let _fbMaxFret = 12;
 
 // ── Scale state ───────────────────────────────────────────────────────────
 
-let _tonal = null;
 let _fbDetectedScale = null;  // { name, tonic, notes: string[] }
 let _fbScalePositions = null; // Map<rsString, Set<fret>>
-let _fbScaleLoading = false;
 
 // ── Pitch helpers ─────────────────────────────────────────────────────────
 
@@ -157,11 +168,64 @@ function _fbResize() {
 
 // ── Scale detection ───────────────────────────────────────────────────────
 
-async function _fbLoadTonal() {
-    if (_tonal) return _tonal;
-    const mod = await import('https://esm.sh/@tonaljs/tonal');
-    _tonal = mod;
-    return _tonal;
+// Build a { name, tonic, notes } result from manifest key/scale fields.
+// Accepts common aliases: "natural minor" → "minor", "pentatonic minor" → "minor pentatonic".
+function _fbScaleFromManifest(key, scaleType) {
+    const aliases = {
+        'natural minor':    'minor',
+        'pentatonic minor': 'minor pentatonic',
+        'pentatonic major': 'major pentatonic',
+    };
+    const normalized = (scaleType || '').toLowerCase().trim();
+    const type = aliases[normalized] || normalized;
+    const entry = SCALE_CATALOG.find(e => e.type === type);
+    if (!entry) return null;
+    const rootIdx = NOTE_NAMES.indexOf((key || '').trim());
+    if (rootIdx < 0) return null;
+    const tonic = NOTE_NAMES[rootIdx];
+    return {
+        name: tonic + ' ' + entry.type,
+        tonic,
+        notes: entry.intervals.map(i => NOTE_NAMES[(rootIdx + i) % 12]),
+    };
+}
+
+// Rank all root×scale combinations against the played pitch classes.
+// Primary sort: recall (fraction of played notes the scale explains).
+// Secondary: precision (fraction of scale notes that were actually played).
+// Tertiary: root was played (avoids tonics that never sounded).
+function _fbDetectScale(pitchClasses) {
+    const pcSet = new Set(
+        pitchClasses.map(pc => NOTE_NAMES.indexOf(pc)).filter(n => n >= 0)
+    );
+    if (!pcSet.size) return null;
+
+    let best = null, bestRecall = -1, bestPrecision = -1, bestRootPlayed = -1;
+
+    for (const { type, intervals } of SCALE_CATALOG) {
+        for (let root = 0; root < 12; root++) {
+            const scaleSet = new Set(intervals.map(i => (root + i) % 12));
+            let matched = 0;
+            for (const pc of pcSet) if (scaleSet.has(pc)) matched++;
+
+            const recall     = matched / pcSet.size;
+            const precision  = matched / intervals.length;
+            const rootPlayed = pcSet.has(root) ? 1 : 0;
+
+            if (recall > bestRecall ||
+                (recall === bestRecall && precision > bestPrecision) ||
+                (recall === bestRecall && precision === bestPrecision && rootPlayed > bestRootPlayed)) {
+                bestRecall = recall; bestPrecision = precision; bestRootPlayed = rootPlayed;
+                const tonic = NOTE_NAMES[root];
+                best = {
+                    name: tonic + ' ' + type,
+                    tonic,
+                    notes: intervals.map(i => NOTE_NAMES[(root + i) % 12]),
+                };
+            }
+        }
+    }
+    return best;
 }
 
 function _fbGetPlayedPitchClasses(tuning, capo) {
@@ -190,36 +254,34 @@ function _fbBuildScalePositions(scaleNotes, tuning, capo) {
     return positions;
 }
 
-async function _fbTriggerScaleDetect() {
-    if (_fbScaleLoading) return;
-    _fbScaleLoading = true;
+function _fbTriggerScaleDetect() {
     try {
         const songInfo = highway.getSongInfo() || {};
         const tuning = songInfo.tuning || [];
         const capo = songInfo.capo || 0;
         _fbComputeMaxFret();
-        const pitchClasses = _fbGetPlayedPitchClasses(tuning, capo);
-        const tonal = await _fbLoadTonal();
-        const candidates = pitchClasses.length ? tonal.Scale.detect(pitchClasses) : [];
-        if (!candidates.length) {
-            _fbDetectedScale = null;
-            _fbScalePositions = null;
-            return;
+
+        // Prefer key/scale authored in the sloppak manifest (when the server
+        // forwards them via song_info — see specs/001-fretboard-learning/analyze.md).
+        if (songInfo.key && songInfo.scale) {
+            const fromManifest = _fbScaleFromManifest(songInfo.key, songInfo.scale);
+            if (fromManifest) {
+                _fbDetectedScale = fromManifest;
+                _fbScalePositions = _fbBuildScalePositions(fromManifest.notes, tuning, capo);
+                return;
+            }
         }
-        const scaleName = candidates[0];
-        const scaleData = tonal.Scale.get(scaleName);
-        _fbDetectedScale = {
-            name: scaleName,
-            tonic: scaleData.tonic || scaleName.split(' ')[0],
-            notes: scaleData.notes && scaleData.notes.length ? scaleData.notes : pitchClasses,
-        };
-        _fbScalePositions = _fbBuildScalePositions(_fbDetectedScale.notes, tuning, capo);
+
+        // Fall back to pitch-class detection from the chart notes.
+        const pitchClasses = _fbGetPlayedPitchClasses(tuning, capo);
+        _fbDetectedScale = pitchClasses.length ? _fbDetectScale(pitchClasses) : null;
+        _fbScalePositions = _fbDetectedScale
+            ? _fbBuildScalePositions(_fbDetectedScale.notes, tuning, capo)
+            : null;
     } catch (e) {
         console.error('[fretboard-learning] scale detection failed', e);
         _fbDetectedScale = null;
         _fbScalePositions = null;
-    } finally {
-        _fbScaleLoading = false;
     }
 }
 
@@ -322,12 +384,6 @@ function _fbDraw() {
             ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
             ctx.fillText(_fbDetectedScale.name, padL + 4, 2);
-        } else if (_fbScaleLoading) {
-            ctx.fillStyle = '#555';
-            ctx.font = '11px sans-serif';
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'top';
-            ctx.fillText('Detecting scale…', padL + 4, 2);
         }
     }
 

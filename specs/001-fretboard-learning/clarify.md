@@ -25,13 +25,12 @@
 **A**: `localStorage` key `fretboard-learning.mode` stores the active mode string (`off` / `classic` / `notes` / `scales`). Switching songs re-injects the select and re-creates the canvas if mode is not `off`. The mode survives browser reloads.
 
 ## Q9: How does Scales mode detect the key?
-**A**: On `song:ready` (or when the user switches to Scales mode), `_fbTriggerScaleDetect` collects every distinct pitch class played in the chart, feeds them to `tonal.Scale.detect()`, and takes the first candidate. If detection returns no candidates (empty chart, or pitch classes don't match any known scale), `_fbDetectedScale` and `_fbScalePositions` are set to `null` and nothing is drawn — no fallback scale is shown. Scale positions are then mapped across all strings and frets up to `_fbMaxFret`. `[OPEN]` Whether the "first candidate" heuristic is good enough or if the user should be able to pick from multiple candidates.
+**A**: On `song:ready` (or when the user switches to Scales mode), `_fbTriggerScaleDetect` collects every distinct pitch class played across the entire arrangement and runs `_fbDetectScale`, which scores every combination of root × scale type against those pitch classes. The winner is the scale whose notes best cover what was played (primary: recall — fraction of played notes explained; secondary: precision — no extra unused notes; tertiary: the root note was actually played). If the sloppak manifest provides `key` + `scale` fields via `songInfo`, those are used directly and detection is skipped entirely.
 
-## Q10: What happens if the Tonal.js CDN (esm.sh) is unavailable?
-**A**: The `import()` inside `_fbLoadTonal` throws, the `catch` block in `_fbTriggerScaleDetect` sets `_fbDetectedScale = null`, and the overlay renders "No scale data". `[OPEN]` Whether to bundle Tonal locally or accept this network dependency. A bundled fallback would make Scales mode work offline.
+**Accuracy limitations:** Detection is a best-fit heuristic over all notes in the arrangement at once. It does not track key changes within the song — a track that modulates from E minor to G major gets one result for the whole thing. The result should be treated as a guide to where on the fretboard the arrangement's notes live, not as authoritative music-theory analysis. When a sloppak manifest includes `key`/`scale` authored by a human (or AI tooling with full musical context), that data takes priority and will be accurate. `[OPEN]` Whether to let the user override the detected scale manually, or pick from the top N candidates.
 
-## Q11: Why is `_fbMaxFret` floored at 12?
+## Q10: Why is `_fbMaxFret` floored at 12?
 **A**: Songs that only use the first few frets would otherwise show a cramped 5- or 6-fret board, which looks odd and hides the standard marker dots (3, 5, 7, 9, 12). The floor of 12 guarantees the first octave is always visible. `[OPEN]` Whether the ceiling should be 24 always (show the full neck) or should track the song's actual max fret (current behaviour).
 
-## Q12: Why does the plugin hook both `playSong` and `song:ready`?
+## Q11: Why does the plugin hook both `playSong` and `song:ready`?
 **A**: The `playSong` wrap re-creates the canvas element between songs (the old canvas is torn down with `_fbRemoveCanvas` so frets from the previous song don't flash). `song:ready` fires after note data has arrived and is the right moment to call `_fbComputeMaxFret` and re-run scale detection — at `playSong` time the note arrays are empty.

@@ -62,40 +62,22 @@ Classic uses the original dot size (r=7) and the original short time window (80 
 
 ---
 
-### Step 3 — Tonal.js integration (scale notes)
+### Step 3 — Inline scale detection (scale notes)
 
 **File:** `screen.js`  
-**Dependency:** `@tonaljs/tonal` loaded via ESM CDN (no bundler needed)
+**No external dependencies** — detection is self-contained.
 
-#### 3a. Load Tonal lazily
+#### 3a. Scale catalogue
 
-```js
-let _tonal = null;
-async function _fbLoadTonal() {
-    if (_tonal) return _tonal;
-    const mod = await import('https://esm.sh/@tonaljs/tonal');
-    _tonal = mod;
-    return _tonal;
-}
-```
-
-Call this when the user switches to Scales mode; do nothing until it resolves (show a "loading…" spinner drawn on the canvas).
+A `SCALE_CATALOG` constant lists 11 common guitar scale types (minor pentatonic, major pentatonic, blues, major, minor, dorian, mixolydian, phrygian, harmonic minor, lydian, locrian) as interval arrays from the root.
 
 #### 3b. Detect the scale from the arrangement
 
-```js
-function _fbDetectScale(songInfo, tuning, capo) {
-    // 1. Read the arrangement's open-string MIDI pitches (already have _fbGetOpenStringMidi)
-    // 2. Collect all unique pitch classes from highway.getNotes() + highway.getChords()
-    // 3. Use Tonal.Scale.detect(noteNames) → returns candidate scale names
-    // 4. Pick the first result; fall back to "chromatic" if empty
-    // Returns { tonic: 'A', scale: 'minor pentatonic', notes: ['A','C','D','E','G'] }
-}
-```
+`_fbDetectScale(pitchClasses)` scores every combination of root (12) × scale type (11) against the played pitch classes. Ranking: recall (fraction of played notes explained) → precision (fraction of scale notes actually played) → root was played. Returns `{ name, tonic, notes[] }` for the top result, or `null` if the input is empty.
 
-`Scale.detect` takes an array of note-name strings and returns guesses ordered by how well they fit. The first match is good enough for practice purposes.
+If `songInfo.key` and `songInfo.scale` are present (forwarded from a sloppak manifest), `_fbScaleFromManifest` builds the result directly from those fields — no note analysis needed. This path takes priority over detection.
 
-Re-detect whenever `song:ready` fires (highway emits this via `window.slopsmith`) so the scale updates when the user switches arrangement mid-session.
+Re-detect whenever `song:ready` fires so the scale updates when the user switches arrangement mid-session. Detection is synchronous — no loading state needed.
 
 #### 3c. Compute scale positions
 
@@ -144,13 +126,10 @@ Font: `12px sans-serif`, color `#aaa`, positioned at `(padL + 4, 4)`. Disappears
 ### Step 6 — Wire `song:ready` for scale re-detection
 
 ```js
-window.slopsmith.on('song:ready', async () => {
+window.slopsmith.on('song:ready', () => {
     if (_fbMode !== 'scales') return;
-    await _fbLoadTonal();
     _fbComputeMaxFret();
-    const songInfo = highway.getSongInfo();
-    _fbDetectedScale = _fbDetectScale(songInfo);
-    _fbScalePositions = _fbBuildScalePositions(_fbDetectedScale.notes, songInfo.tuning || [], songInfo.capo || 0);
+    _fbTriggerScaleDetect();
 });
 ```
 
@@ -176,6 +155,6 @@ Also call this path at the end of `_fbCreateCanvas` when mode is `scales` (handl
 
 ## Decisions
 
-1. **CDN** — Outbound internet available; load Tonal via `esm.sh` CDN (`import('https://esm.sh/@tonaljs/tonal')`).
+1. **No CDN** — Scale detection is a self-contained inline function; no network requests, works offline.
 2. **Bass support** — Scales mode works for all arrangements. `_fbBuildScalePositions` uses `highway.getStringCount()` (not hardcoded 6), so 4-string bass arrangements get the correct positions.
-3. **Accidentals** — Use sharps throughout (`C#`, `D#`, `F#`, `G#`, `A#`). Tonal returns sharps by default — no normalisation needed.
+3. **Accidentals** — Use sharps throughout (`C#`, `D#`, `F#`, `G#`, `A#`). `NOTE_NAMES` is the single source for all pitch-class ↔ name conversions.

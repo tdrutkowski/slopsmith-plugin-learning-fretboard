@@ -69,7 +69,7 @@ A horizontal fretboard overlay drawn below the highway. A mode selector in the p
 - **FR6**: String colors MUST match Rocksmith convention (`FB_STRING_COLORS` for inactive, `FB_STRING_BRIGHT` for active).
 - **FR7**: `screen.js` MUST be idempotent against re-eval — `playSong` wrap installed exactly once via `__slopsmithFretboardLearningHooksInstalled`.
 - **FR8**: Plugin MUST NOT mutate highway state.
-- **FR9**: Scale detection MUST use Tonal.js (loaded from esm.sh); result is cached per song load. While loading, the overlay shows "Detecting scale…".
+- **FR9**: Scale detection MUST be self-contained (no CDN dependency). If `songInfo.key` and `songInfo.scale` are present (sloppak manifest), use them directly. Otherwise, detect from pitch classes using the built-in `SCALE_CATALOG`. Result is recomputed on each `song:ready`.
 - **FR10**: Tonic positions in Scales mode MUST be visually distinct (extra ring + higher opacity) from non-tonic scale notes.
 
 ## Non-Functional Requirements
@@ -77,7 +77,7 @@ A horizontal fretboard overlay drawn below the highway. A mode selector in the p
 - DPR-aware canvas sizing.
 - 60 fps target; per-frame work scales with string count × fret count + visible active notes.
 - Notes array is sorted by time — active-note search breaks at `n.t > t + 0.5` (early exit).
-- Tonal.js is loaded lazily only when Scales mode is first activated; subsequent songs reuse the cached module.
+- Scale detection is synchronous and runs inline against a fixed 11-entry `SCALE_CATALOG`. No network requests.
 
 ## Out of Scope
 

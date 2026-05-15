@@ -17,8 +17,7 @@
 - `_fbMode` — current mode: `'off' | 'classic' | 'notes' | 'scales'`.
 - `_fbCanvas`, `_fbCtx`, `_fbDismissBtn`, `_fbRafId` — DOM/render refs.
 - `_fbMaxFret` — computed from the arrangement's note set (min 12).
-- `_tonal` — cached Tonal.js module (loaded lazily on first Scales activation).
-- `_fbDetectedScale`, `_fbScalePositions`, `_fbScaleLoading` — scale detection state.
+- `_fbDetectedScale`, `_fbScalePositions` — scale detection state.
 
 ## Modes
 
@@ -33,17 +32,16 @@
 
 1. Clear canvas.
 2. Draw fret lines, nut, dot markers, string lines, fret numbers, string name labels.
-3. If Scales: draw dim scale-position dots (`_fbDrawScaleDots`); tonic positions get a ring and higher opacity. Render "Detecting scale…" or detected scale name in the header.
+3. If Scales: draw dim scale-position dots (`_fbDrawScaleDots`); tonic positions get a ring and higher opacity. Render detected scale name in the header (nothing shown if detection found no result).
 4. Collect active notes via `_fbGetActiveNotes(t, notes, chords, fadeOut)`.
 5. For each active note, call `_fbDrawNoteDot` — fret-number dot in classic mode, note-name dot in notes/scales.
 
 ## Scale Detection
 
 Triggered on `song:ready` and on switch to Scales mode:
-1. Collect all pitch classes from `highway.getNotes()` + `highway.getChords()`.
-2. Lazy-load `@tonaljs/tonal` from `esm.sh`.
-3. Run `Scale.detect(pitchClasses)` — take the first candidate, fall back to `"C chromatic"`.
-4. Build a `Map<rsString, Set<fret>>` of every fret position in the detected scale across the full fretboard. Used by `_fbDrawScaleDots`.
+1. If `songInfo.key` + `songInfo.scale` are present (forwarded from a sloppak manifest), build the scale directly via `_fbScaleFromManifest` — no note analysis needed.
+2. Otherwise, collect all distinct pitch classes from `highway.getNotes()` + `highway.getChords()` and run `_fbDetectScale`: scores every root × scale-type combination in `SCALE_CATALOG` by recall (fraction of played notes explained), then precision (no extra unused notes), then whether the root was actually played. Takes the top result.
+3. Build a `Map<rsString, Set<fret>>` of every fret position in the detected scale across the full fretboard. Used by `_fbDrawScaleDots`.
 
 ## Integration Points (Slopsmith core)
 
@@ -70,8 +68,7 @@ Triggered on `song:ready` and on switch to Scales mode:
 ## Tech Stack
 
 - Vanilla JS, Canvas 2D.
-- [Tonal.js](https://github.com/tonaljs/tonal) via `esm.sh` (lazy, Scales mode only).
-- No other external libraries.
+- No external libraries — scale detection uses a self-contained inline `SCALE_CATALOG`.
 - Tailwind classes for mode selector styling (inherited from core stylesheet).
 
 ## Out-of-Plan / Won't Build

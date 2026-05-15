@@ -18,7 +18,9 @@ The classic view: a horizontal fretboard appears below the highway. Active notes
 Same fretboard, but active dots are labelled with the **note name** (C, C#, D, …) instead of the fret number. The dots linger for **10 seconds** after a note is played so you can see which notes are appearing most often over a passage. Useful for connecting what you hear to theory.
 
 ### Scales
-Builds on Notes mode. The plugin collects every pitch class in the arrangement and runs scale detection via [Tonal.js](https://github.com/tonaljs/tonal). The detected scale is displayed at the top of the overlay, and **every position of that scale** across the fretboard is drawn as a dim, string-coloured dot — tonic notes carry a ring and are slightly brighter. Active notes still light up on top, so you can see how what you're playing relates to the full scale pattern.
+Builds on Notes mode. The plugin analyses every pitch class played across the arrangement and finds the best-matching scale from a built-in catalogue of common guitar scales (minor pentatonic, major pentatonic, blues, major, minor, dorian, mixolydian, phrygian, harmonic minor, lydian, locrian). The detected scale is displayed at the top of the overlay, and **every position of that scale** across the fretboard is drawn as a dim, string-coloured dot — tonic notes carry a ring and are slightly brighter. Active notes still light up on top, so you can see how what you're playing relates to the full scale pattern.
+
+> **Accuracy note:** Detection is a best-fit guess over all notes in the arrangement — it picks one scale for the whole song and does not track key changes. Think of it as a guide to *where on the fretboard the arrangement's notes are found*, not as precise music-theory analysis. Songs that change key mid-way, or that use notes from multiple scales, may show a result that covers most but not all of what's played. When a sloppak file includes `key`/`scale` metadata authored alongside the chart, the plugin will use that instead and the display will be accurate.
 
 ## Fretboard details
 
